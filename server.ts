@@ -34,6 +34,13 @@ interface ExamRecord {
   questions: ExamQuestion[];
 }
 
+interface IncomingExamQuestion {
+  prompt: unknown;
+  options: unknown;
+  correctOptionId?: unknown;
+  correctOptionIndex?: unknown;
+}
+
 type PublicExamQuestion = Omit<ExamQuestion, "correctOptionId">;
 type PublicExamRecord = Omit<ExamRecord, "questions"> & { questions: PublicExamQuestion[] };
 
@@ -309,35 +316,89 @@ async function startServer() {
     })
   });
 
-  const isValidExamPayload = (payload: any) => {
-    if (!payload || typeof payload !== "object") return false;
-    const hasRequiredFields =
-      typeof payload.title === "string" &&
-      payload.title.trim().length > 0 &&
-      typeof payload.description === "string" &&
-      payload.description.trim().length > 0 &&
-      (payload.type === "online" || payload.type === "written") &&
-      ["multiple-choice", "coding", "short-answer", "essay"].includes(payload.category) &&
-      typeof payload.dueDate === "string" &&
-      Array.isArray(payload.requirements) &&
-      payload.requirements.every((r: unknown) => typeof r === "string") &&
-      Array.isArray(payload.questions) &&
-      payload.questions.length > 0;
+  const normalizeExamPayload = (payload: any): Omit<ExamRecord, "id" | "status"> | null => {
+    if (!payload || typeof payload !== "object") return null;
 
-    if (!hasRequiredFields) return false;
+    if (typeof payload.title !== "string" || payload.title.trim().length === 0) return null;
+    if (typeof payload.description !== "string" || payload.description.trim().length === 0) return null;
+    if (payload.type !== "online" && payload.type !== "written") return null;
+    if (!["multiple-choice", "coding", "short-answer", "essay"].includes(payload.category)) return null;
+    if (typeof payload.dueDate !== "string" || Number.isNaN(new Date(payload.dueDate).getTime())) return null;
+    if (!Array.isArray(payload.requirements) || payload.requirements.length === 0) return null;
+    if (!Array.isArray(payload.questions) || payload.questions.length === 0) return null;
 
-    return payload.questions.every((question: any) => {
-      if (!question || typeof question !== "object") return false;
-      if (typeof question.prompt !== "string" || question.prompt.trim().length === 0) return false;
-      if (!Array.isArray(question.options) || question.options.length < 2) return false;
-      const optionIds = new Set<string>();
-      for (const option of question.options) {
-        if (!option || typeof option.text !== "string" || option.text.trim().length === 0) return false;
-        if (typeof option.id !== "string" || option.id.trim().length === 0) return false;
-        optionIds.add(option.id);
+    const requirements = payload.requirements
+      .filter((requirement: unknown): requirement is string => typeof requirement === "string")
+      .map(requirement => requirement.trim())
+      .filter(requirement => requirement.length > 0);
+    if (requirements.length === 0) return null;
+
+    const normalizedQuestions: ExamQuestion[] = [];
+
+    for (const rawQuestion of payload.questions as IncomingExamQuestion[]) {
+      if (!rawQuestion || typeof rawQuestion !== "object") return null;
+      if (typeof rawQuestion.prompt !== "string" || rawQuestion.prompt.trim().length === 0) return null;
+      if (!Array.isArray(rawQuestion.options) || rawQuestion.options.length < 2) return null;
+
+      const optionItems = rawQuestion.options
+        .map((option: unknown) => {
+          if (typeof option === "string") {
+            return { id: undefined, text: option.trim() };
+          }
+          if (option && typeof option === "object" && typeof (option as { text?: unknown }).text === "string") {
+            const optionRecord = option as { id?: unknown; text: string };
+            return {
+              id: typeof optionRecord.id === "string" ? optionRecord.id : undefined,
+              text: optionRecord.text.trim()
+            };
+          }
+          return null;
+        })
+        .filter((option): option is { id: string | undefined; text: string } => !!option && option.text.length > 0);
+
+      if (optionItems.length < 2) return null;
+
+      let correctOptionIndex = -1;
+      if (typeof rawQuestion.correctOptionIndex === "number" && Number.isInteger(rawQuestion.correctOptionIndex)) {
+        correctOptionIndex = rawQuestion.correctOptionIndex;
+      } else if (typeof rawQuestion.correctOptionId === "string") {
+        correctOptionIndex = optionItems.findIndex(option => option.id === rawQuestion.correctOptionId);
       }
-      return typeof question.correctOptionId === "string" && optionIds.has(question.correctOptionId);
-    });
+
+      if (correctOptionIndex < 0 || correctOptionIndex >= optionItems.length) return null;
+
+      const questionId = `q-${randomUUID()}`;
+      const options = optionItems.map((option, index) => ({
+        id: `o-${questionId}-${index}`,
+        text: option.text
+      }));
+
+      normalizedQuestions.push({
+        id: questionId,
+        prompt: rawQuestion.prompt.trim(),
+        options,
+        correctOptionId: options[correctOptionIndex].id
+      });
+    }
+
+    const parsedDuration = typeof payload.duration === "number" ? payload.duration : Number(payload.duration);
+    const normalizedDuration = Number.isFinite(parsedDuration) && parsedDuration > 0 ? parsedDuration : undefined;
+    const instructions =
+      typeof payload.instructions === "string" && payload.instructions.trim().length > 0
+        ? payload.instructions.trim()
+        : undefined;
+
+    return {
+      title: payload.title.trim(),
+      description: payload.description.trim(),
+      type: payload.type,
+      category: payload.category,
+      duration: normalizedDuration,
+      dueDate: new Date(payload.dueDate).toISOString(),
+      requirements,
+      instructions,
+      questions: normalizedQuestions
+    };
   };
 
 
@@ -391,12 +452,13 @@ async function startServer() {
   });
 
   app.post("/api/mentor/exams", (req, res) => {
-    if (!isValidExamPayload(req.body)) {
+    const normalizedExam = normalizeExamPayload(req.body);
+    if (!normalizedExam) {
       res.status(400).json({ error: "Invalid exam payload. Include exam details and at least one question with valid options and answer." });
       return;
     }
 
-    const newExam: ExamRecord = { ...req.body, id: randomUUID(), status: "pending" };
+    const newExam: ExamRecord = { ...normalizedExam, id: randomUUID(), status: "pending" };
     exams.push(newExam);
     res.json(newExam);
   });

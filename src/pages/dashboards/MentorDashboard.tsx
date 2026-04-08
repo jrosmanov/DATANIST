@@ -46,7 +46,7 @@ interface ExamFormState {
   duration: string;
   instructions: string;
   requirementId: string;
-  question: ExamQuestionForm;
+  questions: ExamQuestionForm[];
 }
 
 const initialExamForm: ExamFormState = {
@@ -58,11 +58,13 @@ const initialExamForm: ExamFormState = {
   duration: "60",
   instructions: "",
   requirementId: "req1",
-  question: {
-    prompt: "",
-    options: ["", "", "", ""],
-    correctOptionIndex: 0
-  }
+  questions: [
+    {
+      prompt: "",
+      options: ["", "", "", ""],
+      correctOptionIndex: 0
+    }
+  ]
 };
 
 
@@ -101,43 +103,51 @@ export default function MentorDashboard() {
     event.preventDefault();
     setExamMessage("");
 
-    if (typeof crypto === "undefined" || !crypto.randomUUID) {
-      setExamMessage("Your browser does not support secure exam ID generation.");
+    if (!examForm.title.trim() || !examForm.description.trim() || !examForm.dueDate) {
+      setExamMessage("Please complete all required exam details.");
       return;
     }
 
-    const normalizedOptions = examForm.question.options
-      .map((option: string, index: number) => ({ text: option.trim(), originalIndex: index }))
-      .filter((option: { text: string; originalIndex: number }) => option.text.length > 0);
+    const normalizedQuestions = [];
+    for (let questionIndex = 0; questionIndex < examForm.questions.length; questionIndex += 1) {
+      const question = examForm.questions[questionIndex];
+      const normalizedOptions = question.options
+        .map((option: string, index: number) => ({ text: option.trim(), originalIndex: index }))
+        .filter((option: { text: string; originalIndex: number }) => option.text.length > 0);
 
-    if (normalizedOptions.length < 2) {
-      setExamMessage("Please provide at least two answer options.");
+      if (!question.prompt.trim()) {
+        setExamMessage(`Please provide text for question ${questionIndex + 1}.`);
+        return;
+      }
+      if (normalizedOptions.length < 2) {
+        setExamMessage(`Question ${questionIndex + 1} needs at least two answer options.`);
+        return;
+      }
+
+      const selectedCorrectOption = normalizedOptions.find(
+        (option: { text: string; originalIndex: number }) => option.originalIndex === question.correctOptionIndex
+      );
+      if (!selectedCorrectOption) {
+        setExamMessage(`Please pick a valid correct answer for question ${questionIndex + 1}.`);
+        return;
+      }
+
+      normalizedQuestions.push({
+        prompt: question.prompt.trim(),
+        options: normalizedOptions.map((option: { text: string; originalIndex: number }) => option.text),
+        correctOptionIndex: normalizedOptions.findIndex(
+          (option: { text: string; originalIndex: number }) => option.originalIndex === question.correctOptionIndex
+        )
+      });
+    }
+
+    const trimmedRequirement = examForm.requirementId.trim();
+    if (!trimmedRequirement) {
+      setExamMessage("Please provide a requirement id.");
       return;
     }
 
-    if (!examForm.question.prompt.trim()) {
-      setExamMessage("Please provide a question.");
-      return;
-    }
-
-    const selectedCorrectOption = normalizedOptions.find(
-      (option: { text: string; originalIndex: number }) => option.originalIndex === examForm.question.correctOptionIndex
-    );
-    if (!selectedCorrectOption) {
-      setExamMessage("Please mark a non-empty option as the correct answer.");
-      return;
-    }
-
-    const questionUuid = crypto.randomUUID();
-    const questionId = `q-${questionUuid}`;
-    const options = normalizedOptions.map((option: { text: string; originalIndex: number }, index: number) => ({
-      id: `o-${questionId}-${index}`,
-      text: option.text
-    }));
     const parsedDuration = examForm.duration.trim() === "" ? undefined : Number(examForm.duration);
-    const correctOptionId = options[normalizedOptions.findIndex(
-      (option: { text: string; originalIndex: number }) => option.originalIndex === examForm.question.correctOptionIndex
-    )].id;
 
     const payload = {
       title: examForm.title.trim(),
@@ -147,15 +157,8 @@ export default function MentorDashboard() {
       dueDate: examForm.dueDate,
       duration: Number.isFinite(parsedDuration) && parsedDuration && parsedDuration > 0 ? parsedDuration : undefined,
       instructions: examForm.instructions.trim(),
-      requirements: [examForm.requirementId],
-      questions: [
-        {
-          id: questionId,
-          prompt: examForm.question.prompt.trim(),
-          options,
-          correctOptionId
-        }
-      ]
+      requirements: [trimmedRequirement],
+      questions: normalizedQuestions
     };
 
     const response = await fetch("/api/mentor/exams", {
@@ -173,6 +176,21 @@ export default function MentorDashboard() {
     setExamMessage("Exam created successfully.");
     setExamForm(initialExamForm);
     loadMentorExams();
+  };
+
+  const addQuestion = () => {
+    setExamForm(prev => ({
+      ...prev,
+      questions: [...prev.questions, { prompt: "", options: ["", "", "", ""], correctOptionIndex: 0 }]
+    }));
+  };
+
+  const removeQuestion = (questionIndex: number) => {
+    setExamForm(prev => {
+      if (prev.questions.length <= 1) return prev;
+      const nextQuestions = prev.questions.filter((_, index) => index !== questionIndex);
+      return { ...prev, questions: nextQuestions };
+    });
   };
 
 
@@ -418,7 +436,7 @@ export default function MentorDashboard() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="card p-6 space-y-4">
                 <h2 className="text-xl font-black text-slate-900">Create Exam (Mentor)</h2>
-                <p className="text-sm text-slate-500">Add one question with answer options to publish a new exam.</p>
+                <p className="text-sm text-slate-500">Add as many questions and answers as needed to publish a complete exam.</p>
                 <form className="space-y-3" onSubmit={handleCreateExam}>
                   <input
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
@@ -471,45 +489,81 @@ export default function MentorDashboard() {
                       placeholder="Duration (minutes)"
                     />
                   </div>
-                  <input
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
-                    placeholder="Question prompt"
-                    value={examForm.question.prompt}
-                    onChange={(e) => setExamForm(prev => ({ ...prev, question: { ...prev.question, prompt: e.target.value } }))}
-                    required
-                  />
-                  <div className="grid grid-cols-2 gap-3">
-                    {examForm.question.options.map((option, index) => (
-                      <input
-                        key={index}
-                        className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
-                        placeholder={`Option ${index + 1}`}
-                        value={option}
-                        onChange={(e) => setExamForm(prev => {
-                          const nextOptions = [...prev.question.options];
-                          nextOptions[index] = e.target.value;
-                          return { ...prev, question: { ...prev.question, options: nextOptions } };
-                        })}
-                      />
+                  <div className="space-y-4">
+                    {examForm.questions.map((question, questionIndex) => (
+                      <div key={questionIndex} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-black uppercase tracking-widest text-slate-500">
+                            Question {questionIndex + 1}
+                          </p>
+                          {examForm.questions.length > 1 && (
+                            <button
+                              type="button"
+                              className="text-xs font-bold text-red-500 hover:text-red-600"
+                              onClick={() => removeQuestion(questionIndex)}
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                        <input
+                          className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm"
+                          placeholder="Question prompt"
+                          value={question.prompt}
+                          onChange={(e) => setExamForm(prev => {
+                            const nextQuestions = [...prev.questions];
+                            nextQuestions[questionIndex] = { ...nextQuestions[questionIndex], prompt: e.target.value };
+                            return { ...prev, questions: nextQuestions };
+                          })}
+                        />
+                        <div className="grid grid-cols-2 gap-3">
+                          {question.options.map((option, optionIndex) => (
+                            <input
+                              key={optionIndex}
+                              className="bg-white border border-slate-200 rounded-xl p-3 text-sm"
+                              placeholder={`Option ${optionIndex + 1}`}
+                              value={option}
+                              onChange={(e) => setExamForm(prev => {
+                                const nextQuestions = [...prev.questions];
+                                const nextOptions = [...nextQuestions[questionIndex].options];
+                                nextOptions[optionIndex] = e.target.value;
+                                nextQuestions[questionIndex] = {
+                                  ...nextQuestions[questionIndex],
+                                  options: nextOptions
+                                };
+                                return { ...prev, questions: nextQuestions };
+                              })}
+                            />
+                          ))}
+                        </div>
+                        <select
+                          className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm"
+                          value={question.correctOptionIndex}
+                          onChange={(e) => setExamForm(prev => {
+                            const nextQuestions = [...prev.questions];
+                            nextQuestions[questionIndex] = {
+                              ...nextQuestions[questionIndex],
+                              correctOptionIndex: Number(e.target.value)
+                            };
+                            return { ...prev, questions: nextQuestions };
+                          })}
+                        >
+                          {question.options.map((_, optionIndex) => (
+                            <option key={optionIndex} value={optionIndex}>Correct option {optionIndex + 1}</option>
+                          ))}
+                        </select>
+                      </div>
                     ))}
+                    <button type="button" className="w-full px-3 py-2 rounded-xl bg-slate-100 text-sm font-bold text-slate-700 hover:bg-slate-200" onClick={addQuestion}>
+                      Add Question
+                    </button>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <select
-                      className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
-                      value={examForm.question.correctOptionIndex}
-                      onChange={(e) => setExamForm(prev => ({ ...prev, question: { ...prev.question, correctOptionIndex: Number(e.target.value) } }))}
-                    >
-                      {examForm.question.options.map((_, index) => (
-                        <option key={index} value={index}>Correct option {index + 1}</option>
-                      ))}
-                    </select>
-                    <input
-                      className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
-                      value={examForm.requirementId}
-                      onChange={(e) => setExamForm(prev => ({ ...prev, requirementId: e.target.value }))}
-                      placeholder="Requirement id (ex: req1)"
-                    />
-                  </div>
+                  <input
+                    className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm w-full"
+                    value={examForm.requirementId}
+                    onChange={(e) => setExamForm(prev => ({ ...prev, requirementId: e.target.value }))}
+                    placeholder="Requirement id (ex: req1)"
+                  />
                   <textarea
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
                     placeholder="Instructions"
