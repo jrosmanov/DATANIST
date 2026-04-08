@@ -1,10 +1,42 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import { randomUUID } from "crypto";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+interface ExamQuestionOption {
+  id: string;
+  text: string;
+}
+
+interface ExamQuestion {
+  id: string;
+  prompt: string;
+  options: ExamQuestionOption[];
+  correctOptionId: string;
+}
+
+interface ExamRecord {
+  id: string;
+  title: string;
+  description: string;
+  type: "online" | "written";
+  category: "multiple-choice" | "coding" | "short-answer" | "essay";
+  duration?: number;
+  dueDate: string;
+  status: "pending" | "submitted" | "graded";
+  score?: number;
+  requirements: string[];
+  instructions?: string;
+  questions: ExamQuestion[];
+}
+
+type PublicExamQuestion = Omit<ExamQuestion, "correctOptionId">;
+type PublicExamRecord = Omit<ExamRecord, "questions"> & { questions: PublicExamQuestion[] };
+
 
 async function startServer() {
   const app = express();
@@ -217,7 +249,7 @@ async function startServer() {
     }
   ];
 
-  let exams = [
+  let exams: ExamRecord[] = [
     { 
       id: "ex1", 
       title: "C Programming Midterm", 
@@ -228,7 +260,20 @@ async function startServer() {
       dueDate: "2026-04-15T23:59:59Z",
       status: "pending",
       requirements: ["req1"],
-      instructions: "Complete all 5 coding challenges. You have 2 hours."
+      instructions: "Complete all 5 coding challenges. You have 2 hours.",
+      questions: [
+        {
+          id: "ex1-q1",
+          prompt: "Which function allocates memory dynamically in C?",
+          options: [
+            { id: "ex1-q1-a1", text: "printf" },
+            { id: "ex1-q1-a2", text: "malloc" },
+            { id: "ex1-q1-a3", text: "fopen" },
+            { id: "ex1-q1-a4", text: "strlen" }
+          ],
+          correctOptionId: "ex1-q1-a2"
+        }
+      ]
     },
     { 
       id: "ex2", 
@@ -239,9 +284,62 @@ async function startServer() {
       dueDate: "2026-04-20T23:59:59Z",
       status: "pending",
       requirements: ["req2"],
-      instructions: "Submit your GitHub repository link and a 500-word motivation letter."
+      instructions: "Submit your GitHub repository link and a 500-word motivation letter.",
+      questions: [
+        {
+          id: "ex2-q1",
+          prompt: "What is the main purpose of a Python class?",
+          options: [
+            { id: "ex2-q1-a1", text: "To define a reusable object blueprint" },
+            { id: "ex2-q1-a2", text: "To import libraries" },
+            { id: "ex2-q1-a3", text: "To install dependencies" },
+            { id: "ex2-q1-a4", text: "To open files" }
+          ],
+          correctOptionId: "ex2-q1-a1"
+        }
+      ]
     }
   ];
+
+  const stripExamAnswers = (exam: ExamRecord): PublicExamRecord => ({
+    ...exam,
+    questions: exam.questions.map(question => {
+      const { correctOptionId, ...strippedQuestion } = question;
+      return strippedQuestion;
+    })
+  });
+
+  const isValidExamPayload = (payload: any) => {
+    if (!payload || typeof payload !== "object") return false;
+    const hasRequiredFields =
+      typeof payload.title === "string" &&
+      payload.title.trim().length > 0 &&
+      typeof payload.description === "string" &&
+      payload.description.trim().length > 0 &&
+      (payload.type === "online" || payload.type === "written") &&
+      ["multiple-choice", "coding", "short-answer", "essay"].includes(payload.category) &&
+      typeof payload.dueDate === "string" &&
+      Array.isArray(payload.requirements) &&
+      payload.requirements.every((r: unknown) => typeof r === "string") &&
+      Array.isArray(payload.questions) &&
+      payload.questions.length > 0;
+
+    if (!hasRequiredFields) return false;
+
+    return payload.questions.every((question: any) => {
+      if (!question || typeof question !== "object") return false;
+      if (typeof question.prompt !== "string" || question.prompt.trim().length === 0) return false;
+      if (!Array.isArray(question.options) || question.options.length < 2) return false;
+      const optionIds = new Set<string>();
+      for (const option of question.options) {
+        if (!option || typeof option.text !== "string" || option.text.trim().length === 0) return false;
+        if (typeof option.id !== "string" || option.id.trim().length === 0) return false;
+        optionIds.add(option.id);
+      }
+      return typeof question.correctOptionId === "string" && optionIds.has(question.correctOptionId);
+    });
+  };
+
 
   // Auth API
   app.post("/api/auth/login", (req, res) => {
@@ -289,14 +387,24 @@ async function startServer() {
 
   // Exams API
   app.get("/api/exams", (req, res) => {
-    res.json(exams);
+    res.json(exams.map(stripExamAnswers));
   });
 
-  app.post("/api/exams", (req, res) => {
-    const newExam = { ...req.body, id: Math.random().toString(36).substr(2, 9) };
+  app.post("/api/mentor/exams", (req, res) => {
+    if (!isValidExamPayload(req.body)) {
+      res.status(400).json({ error: "Invalid exam payload. Include exam details and at least one question with valid options and answer." });
+      return;
+    }
+
+    const newExam: ExamRecord = { ...req.body, id: randomUUID(), status: "pending" };
     exams.push(newExam);
     res.json(newExam);
   });
+
+  app.get("/api/mentor/exams", (req, res) => {
+    res.json(exams);
+  });
+
 
   app.get("/api/requirements", (req, res) => {
     res.json(requirements);
@@ -358,38 +466,7 @@ async function startServer() {
     res.json({ status: "ok", message: "Holberton Platform API is running" });
   });
 
-  // Mock Data for the Hackathon
-  const mockData = {
-    leaderboard: [
-      { id: 1, name: "Jalal O.", points: 1250, rank: 1, avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Jalal" },
-      { id: 2, name: "Aysel M.", points: 1180, rank: 2, avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Aysel" },
-      { id: 3, name: "Orkhan S.", points: 1120, rank: 3, avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Orkhan" },
-      { id: 4, name: "Gunay T.", points: 1050, rank: 4, avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Gunay" },
-      { id: 5, name: "Emin R.", points: 980, rank: 5, avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Emin" },
-    ],
-    events: [
-      { id: 1, title: "IDDA Tech Conference", date: "2026-05-15", location: "Baku, Azerbaijan", type: "IDDA" },
-      { id: 2, title: "Holberton Demo Day", date: "2026-04-20", location: "Holberton Campus", type: "Holberton" },
-      { id: 3, title: "AI Hackathon 2026", date: "2026-04-08", location: "Online", type: "Events" },
-    ],
-    exams: [
-      { id: 1, title: "C Programming - Advanced", duration: "120m", status: "Available" },
-      { id: 2, title: "Python Data Structures", duration: "90m", status: "Completed" },
-      { id: 3, title: "Shell Scripting Basics", duration: "60m", status: "Available" },
-    ]
-  };
-
-  app.get("/api/leaderboard", (req, res) => {
-    res.json(mockData.leaderboard);
-  });
-
-  app.get("/api/events", (req, res) => {
-    res.json(mockData.events);
-  });
-
-  app.get("/api/exams", (req, res) => {
-    res.json(mockData.exams);
-  });
+  
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

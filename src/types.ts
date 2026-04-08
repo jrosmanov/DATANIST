@@ -184,6 +184,19 @@ export interface Exam {
   score?: number;
   requirements: string[]; // IDs of requirements
   instructions?: string;
+   questions?: ExamQuestion[];
+}
+
+export interface ExamQuestionOption {
+  id: string;
+  text: string;
+}
+
+export interface ExamQuestion {
+  id: string;
+  prompt: string;
+  options: ExamQuestionOption[];
+  correctOptionId: string;
 }
 
 export interface Requirement {
