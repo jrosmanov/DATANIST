@@ -271,6 +271,28 @@ async function startServer() {
             { id: "ex1-q1-a4", text: "strlen" }
           ],
           correctOptionId: "ex1-q1-a2"
+        },
+        {
+          id: "ex1-q2",
+          prompt: "What is the correct way to free allocated memory?",
+          options: [
+            { id: "ex1-q2-a1", text: "delete(ptr);" },
+            { id: "ex1-q2-a2", text: "free(ptr);" },
+            { id: "ex1-q2-a3", text: "remove(ptr);" },
+            { id: "ex1-q2-a4", text: "clear(ptr);" }
+          ],
+          correctOptionId: "ex1-q2-a2"
+        },
+        {
+          id: "ex1-q3",
+          prompt: "Which pointer value indicates no valid address?",
+          options: [
+            { id: "ex1-q3-a1", text: "ZERO" },
+            { id: "ex1-q3-a2", text: "NULL" },
+            { id: "ex1-q3-a3", text: "VOID" },
+            { id: "ex1-q3-a4", text: "EMPTY" }
+          ],
+          correctOptionId: "ex1-q3-a2"
         }
       ]
     },
@@ -295,6 +317,17 @@ async function startServer() {
             { id: "ex2-q1-a4", text: "To open files" }
           ],
           correctOptionId: "ex2-q1-a1"
+        },
+        {
+          id: "ex2-q2",
+          prompt: "Which statement best describes encapsulation?",
+          options: [
+            { id: "ex2-q2-a1", text: "Combining data and methods inside a class" },
+            { id: "ex2-q2-a2", text: "Running code in parallel" },
+            { id: "ex2-q2-a3", text: "Only using global variables" },
+            { id: "ex2-q2-a4", text: "Avoiding functions" }
+          ],
+          correctOptionId: "ex2-q2-a1"
         }
       ]
     }
@@ -401,6 +434,54 @@ async function startServer() {
 
   app.get("/api/mentor/exams", (req, res) => {
     res.json(exams);
+  });
+
+  app.post("/api/exams/:id/submit", (req, res) => {
+    const exam = exams.find(existingExam => existingExam.id === req.params.id);
+    if (!exam) {
+      res.status(404).json({ error: "Exam not found" });
+      return;
+    }
+
+    if (exam.status !== "pending") {
+      res.status(400).json({ error: "Exam is already submitted." });
+      return;
+    }
+
+    if (exam.type === "online") {
+      const answers = req.body?.answers ?? {};
+      let correctAnswers = 0;
+
+      for (const question of exam.questions) {
+        if (answers[question.id] === question.correctOptionId) {
+          correctAnswers += 1;
+        }
+      }
+
+      const score = exam.questions.length === 0 ? 0 : Math.round((correctAnswers / exam.questions.length) * 100);
+      exam.score = score;
+      exam.status = "graded";
+
+      res.json({
+        success: true,
+        exam: stripExamAnswers(exam),
+        result: {
+          score,
+          correctAnswers,
+          totalQuestions: exam.questions.length
+        }
+      });
+      return;
+    }
+
+    exam.status = "submitted";
+    res.json({
+      success: true,
+      exam: stripExamAnswers(exam),
+      result: {
+        message: "Written exam submitted successfully."
+      }
+    });
   });
 
   app.get("/api/requirements", (req, res) => {

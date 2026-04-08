@@ -26,6 +26,10 @@ export default function Exam() {
   const [cms, setCms] = useState<CMSContent | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"online" | "written" | "requirements" | "ai">("online");
+  const [activeExam, setActiveExam] = useState<ExamType | null>(null);
+  const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string>>({});
+  const [examActionMessage, setExamActionMessage] = useState<string>("");
+  const [isSubmittingExam, setIsSubmittingExam] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -57,6 +61,53 @@ export default function Exam() {
   ].filter(t => t.show);
 
   const filteredExams = exams.filter(e => e.type === activeTab);
+  const pendingExamCount = exams.filter(exam => exam.status === "pending").length;
+
+  const refreshExams = () => {
+    fetch("/api/exams")
+      .then(res => res.json())
+      .then(examsData => setExams(examsData));
+  };
+
+  const handleStartExam = (exam: ExamType) => {
+    if (!exam.questions || exam.questions.length === 0) {
+      setExamActionMessage("This exam has no questions yet. Please contact your mentor.");
+      return;
+    }
+    setExamActionMessage("");
+    setSelectedAnswers({});
+    setActiveExam(exam);
+  };
+
+  const handleSubmitExam = async () => {
+    if (!activeExam) return;
+
+    setIsSubmittingExam(true);
+    setExamActionMessage("");
+    const response = await fetch(`/api/exams/${activeExam.id}/submit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answers: selectedAnswers })
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    setIsSubmittingExam(false);
+
+    if (!response.ok) {
+      setExamActionMessage(payload.error || "Failed to submit exam.");
+      return;
+    }
+
+    if (payload.result?.score !== undefined) {
+      setExamActionMessage(`Exam submitted. You scored ${payload.result.score}% (${payload.result.correctAnswers}/${payload.result.totalQuestions}).`);
+    } else {
+      setExamActionMessage(payload.result?.message || "Exam submitted successfully.");
+    }
+
+    setActiveExam(null);
+    setSelectedAnswers({});
+    refreshExams();
+  };
 
   return (
     <div className="space-y-8">
@@ -69,7 +120,7 @@ export default function Exam() {
         <div className="flex items-center gap-4">
           <div className="hidden lg:flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-100 rounded-xl">
             <Bell className="w-4 h-4 text-amber-500" />
-            <span className="text-xs font-bold text-amber-700">Next Exam: C Midterm (April 15)</span>
+            <span className="text-xs font-bold text-amber-700">Pending Exams: {pendingExamCount}</span>
           </div>
           <div className="flex bg-slate-100 p-1 rounded-xl">
             {tabs.map((tab) => (
@@ -90,6 +141,60 @@ export default function Exam() {
           </div>
         </div>
       </div>
+
+      {activeExam && (
+        <div className="card p-6 space-y-6 border border-[#e31c3d]/20">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-xl font-black text-slate-900">{activeExam.title}</h3>
+              <p className="text-sm text-slate-500">Answer all questions and submit your exam.</p>
+            </div>
+            <button
+              className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold"
+              onClick={() => setActiveExam(null)}
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            {(activeExam.questions || []).map((question, questionIndex) => (
+              <div key={question.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50">
+                <h4 className="font-bold text-slate-900 mb-3">
+                  {questionIndex + 1}. {question.prompt}
+                </h4>
+                <div className="space-y-2">
+                  {question.options.map((option) => (
+                    <label key={option.id} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                      <input
+                        type="radio"
+                        name={question.id}
+                        checked={selectedAnswers[question.id] === option.id}
+                        onChange={() => setSelectedAnswers(prev => ({ ...prev, [question.id]: option.id }))}
+                      />
+                      <span>{option.text}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <button
+            className="btn-primary w-full"
+            onClick={handleSubmitExam}
+            disabled={isSubmittingExam}
+          >
+            {isSubmittingExam ? "Submitting..." : "Submit Exam"}
+          </button>
+        </div>
+      )}
+
+      {examActionMessage && (
+        <div className="px-4 py-3 rounded-xl bg-blue-50 border border-blue-100 text-sm font-bold text-blue-700">
+          {examActionMessage}
+        </div>
+      )}
 
       <AnimatePresence mode="wait">
         <motion.div
@@ -142,7 +247,12 @@ export default function Exam() {
                         </div>
                       </div>
 
-                      <button 
+                      <button
+                        onClick={() => {
+                          if (exam.status !== "pending") return;
+                          handleStartExam(exam);
+                        }}
+                        disabled={exam.status !== "pending"}
                         className={cn(
                           "w-full py-3 rounded-xl font-black text-sm flex items-center justify-center gap-2 transition-all",
                           exam.status === "pending" 
@@ -153,7 +263,7 @@ export default function Exam() {
                         {exam.status === "pending" ? (
                           <>
                             <Play className="w-4 h-4" />
-                            {activeTab === "online" ? "Start Exam" : "Submit Work"}
+                            {activeTab === "online" ? "Start Exam" : "Open Submission"}
                           </>
                         ) : (
                           <>
@@ -286,7 +396,10 @@ export default function Exam() {
                   </div>
                 </div>
 
-                <button className="btn-primary flex items-center gap-2">
+                <button
+                  className="btn-primary flex items-center gap-2"
+                  onClick={() => setExamActionMessage("AI study plan generation has started. Check back in a moment.")}
+                >
                   <Brain className="w-4 h-4" /> Generate Study Plan
                 </button>
               </div>

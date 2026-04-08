@@ -196,7 +196,7 @@ export interface ExamQuestion {
   id: string;
   prompt: string;
   options: ExamQuestionOption[];
-  correctOptionId: string;
+  correctOptionId?: string;
 }
 
 export interface Requirement {

@@ -46,7 +46,8 @@ interface ExamFormState {
   duration: string;
   instructions: string;
   requirementId: string;
-  question: ExamQuestionForm;
+  questionDraft: ExamQuestionForm;
+  questions: ExamQuestionForm[];
 }
 
 const initialExamForm: ExamFormState = {
@@ -58,11 +59,12 @@ const initialExamForm: ExamFormState = {
   duration: "60",
   instructions: "",
   requirementId: "req1",
-  question: {
+  questionDraft: {
     prompt: "",
     options: ["", "", "", ""],
     correctOptionIndex: 0
-  }
+  },
+  questions: []
 };
 
 export default function MentorDashboard() {
@@ -96,6 +98,51 @@ export default function MentorDashboard() {
     });
   }, []);
 
+  const resetQuestionDraft = () => ({
+    prompt: "",
+    options: ["", "", "", ""],
+    correctOptionIndex: 0
+  });
+
+  const addQuestionToExam = () => {
+    const normalizedOptions = examForm.questionDraft.options
+      .map((option, index) => ({ text: option.trim(), originalIndex: index }))
+      .filter(option => option.text.length > 0);
+
+    if (!examForm.questionDraft.prompt.trim()) {
+      setExamMessage("Please provide a question prompt before adding.");
+      return;
+    }
+
+    if (normalizedOptions.length < 2) {
+      setExamMessage("Each question must have at least two non-empty answer options.");
+      return;
+    }
+
+    const selectedCorrectOption = normalizedOptions.find(
+      option => option.originalIndex === examForm.questionDraft.correctOptionIndex
+    );
+
+    if (!selectedCorrectOption) {
+      setExamMessage("Please select a non-empty correct option.");
+      return;
+    }
+
+    setExamForm(prev => ({
+      ...prev,
+      questions: [...prev.questions, prev.questionDraft],
+      questionDraft: resetQuestionDraft()
+    }));
+    setExamMessage("Question added to exam draft.");
+  };
+
+  const removeDraftQuestion = (index: number) => {
+    setExamForm(prev => ({
+      ...prev,
+      questions: prev.questions.filter((_, questionIndex) => questionIndex !== index)
+    }));
+  };
+
   const handleCreateExam = async (event: React.FormEvent) => {
     event.preventDefault();
     setExamMessage("");
@@ -105,38 +152,33 @@ export default function MentorDashboard() {
       return;
     }
 
-    const normalizedOptions = examForm.question.options
-      .map((option, index) => ({ text: option.trim(), originalIndex: index }))
-      .filter(option => option.text.length > 0);
-
-    if (normalizedOptions.length < 2) {
-      setExamMessage("Please provide at least two answer options.");
+    if (examForm.questions.length === 0) {
+      setExamMessage("Add at least one question before creating the exam.");
       return;
     }
 
-    if (!examForm.question.prompt.trim()) {
-      setExamMessage("Please provide a question.");
-      return;
-    }
-
-    const selectedCorrectOption = normalizedOptions.find(
-      option => option.originalIndex === examForm.question.correctOptionIndex
-    );
-    if (!selectedCorrectOption) {
-      setExamMessage("Please mark a non-empty option as the correct answer.");
-      return;
-    }
-
-    const questionUuid = crypto.randomUUID();
-    const questionId = `q-${questionUuid}`;
-    const options = normalizedOptions.map((option, index) => ({
-      id: `o-${questionId}-${index}`,
-      text: option.text
-    }));
     const parsedDuration = examForm.duration.trim() === "" ? undefined : Number(examForm.duration);
-    const correctOptionId = options[normalizedOptions.findIndex(
-      option => option.originalIndex === examForm.question.correctOptionIndex
-    )].id;
+    const questionsPayload = examForm.questions.map((question, questionIndex) => {
+      const questionUuid = crypto.randomUUID();
+      const questionId = `q-${questionUuid}`;
+      const normalizedOptions = question.options
+        .map((option, optionIndex) => ({ text: option.trim(), originalIndex: optionIndex }))
+        .filter(option => option.text.length > 0);
+      const options = normalizedOptions.map((option, optionIndex) => ({
+        id: `o-${questionId}-${optionIndex}`,
+        text: option.text
+      }));
+      const correctOptionIndex = normalizedOptions.findIndex(
+        option => option.originalIndex === question.correctOptionIndex
+      );
+
+      return {
+        id: `${questionId}-${questionIndex}`,
+        prompt: question.prompt.trim(),
+        options,
+        correctOptionId: options[Math.max(0, correctOptionIndex)].id
+      };
+    });
 
     const payload = {
       title: examForm.title.trim(),
@@ -147,14 +189,7 @@ export default function MentorDashboard() {
       duration: Number.isFinite(parsedDuration) && parsedDuration && parsedDuration > 0 ? parsedDuration : undefined,
       instructions: examForm.instructions.trim(),
       requirements: [examForm.requirementId],
-      questions: [
-        {
-          id: questionId,
-          prompt: examForm.question.prompt.trim(),
-          options,
-          correctOptionId
-        }
-      ]
+      questions: questionsPayload
     };
 
     const response = await fetch("/api/mentor/exams", {
@@ -416,7 +451,7 @@ export default function MentorDashboard() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="card p-6 space-y-4">
                 <h2 className="text-xl font-black text-slate-900">Create Exam (Mentor)</h2>
-                <p className="text-sm text-slate-500">Add one question with answer options to publish a new exam.</p>
+                <p className="text-sm text-slate-500">Build a full exam by adding multiple questions before publishing.</p>
                 <form className="space-y-3" onSubmit={handleCreateExam}>
                   <input
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
@@ -472,21 +507,20 @@ export default function MentorDashboard() {
                   <input
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
                     placeholder="Question prompt"
-                    value={examForm.question.prompt}
-                    onChange={(e) => setExamForm(prev => ({ ...prev, question: { ...prev.question, prompt: e.target.value } }))}
-                    required
+                    value={examForm.questionDraft.prompt}
+                    onChange={(e) => setExamForm(prev => ({ ...prev, questionDraft: { ...prev.questionDraft, prompt: e.target.value } }))}
                   />
                   <div className="grid grid-cols-2 gap-3">
-                    {examForm.question.options.map((option, index) => (
+                    {examForm.questionDraft.options.map((option, index) => (
                       <input
                         key={index}
                         className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
                         placeholder={`Option ${index + 1}`}
                         value={option}
                         onChange={(e) => setExamForm(prev => {
-                          const nextOptions = [...prev.question.options];
+                          const nextOptions = [...prev.questionDraft.options];
                           nextOptions[index] = e.target.value;
-                          return { ...prev, question: { ...prev.question, options: nextOptions } };
+                          return { ...prev, questionDraft: { ...prev.questionDraft, options: nextOptions } };
                         })}
                       />
                     ))}
@@ -494,10 +528,10 @@ export default function MentorDashboard() {
                   <div className="grid grid-cols-2 gap-3">
                     <select
                       className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
-                      value={examForm.question.correctOptionIndex}
-                      onChange={(e) => setExamForm(prev => ({ ...prev, question: { ...prev.question, correctOptionIndex: Number(e.target.value) } }))}
+                      value={examForm.questionDraft.correctOptionIndex}
+                      onChange={(e) => setExamForm(prev => ({ ...prev, questionDraft: { ...prev.questionDraft, correctOptionIndex: Number(e.target.value) } }))}
                     >
-                      {examForm.question.options.map((_, index) => (
+                      {examForm.questionDraft.options.map((_, index) => (
                         <option key={index} value={index}>Correct option {index + 1}</option>
                       ))}
                     </select>
@@ -508,6 +542,31 @@ export default function MentorDashboard() {
                       placeholder="Requirement id (ex: req1)"
                     />
                   </div>
+                  <button
+                    className="w-full px-4 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm"
+                    type="button"
+                    onClick={addQuestionToExam}
+                  >
+                    Add Question to Exam
+                  </button>
+                  {examForm.questions.length > 0 && (
+                    <div className="space-y-2">
+                      {examForm.questions.map((question, index) => (
+                        <div key={`${question.prompt}-${index}`} className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                          <p className="text-xs font-bold text-slate-700 truncate pr-2">
+                            Q{index + 1}: {question.prompt}
+                          </p>
+                          <button
+                            type="button"
+                            className="text-xs font-bold text-red-500 hover:text-red-600"
+                            onClick={() => removeDraftQuestion(index)}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <textarea
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
                     placeholder="Instructions"
