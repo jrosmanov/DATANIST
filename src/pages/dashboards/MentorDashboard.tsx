@@ -100,7 +100,15 @@ export default function MentorDashboard() {
     event.preventDefault();
     setExamMessage("");
 
-    const normalizedOptions = examForm.question.options.map(option => option.trim()).filter(Boolean);
+    if (typeof crypto === "undefined" || !crypto.randomUUID) {
+      setExamMessage("Your browser does not support secure exam ID generation.");
+      return;
+    }
+
+    const normalizedOptions = examForm.question.options
+      .map((option, index) => ({ text: option.trim(), originalIndex: index }))
+      .filter(option => option.text.length > 0);
+
     if (normalizedOptions.length < 2) {
       setExamMessage("Please provide at least two answer options.");
       return;
@@ -111,14 +119,24 @@ export default function MentorDashboard() {
       return;
     }
 
-    const uuidSource = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const questionId = `q-${uuidSource}`;
-    const options = normalizedOptions.map((text, index) => ({
+    const selectedCorrectOption = normalizedOptions.find(
+      option => option.originalIndex === examForm.question.correctOptionIndex
+    );
+    if (!selectedCorrectOption) {
+      setExamMessage("Please mark a non-empty option as the correct answer.");
+      return;
+    }
+
+    const questionUuid = crypto.randomUUID();
+    const questionId = `q-${questionUuid}`;
+    const options = normalizedOptions.map((option, index) => ({
       id: `o-${questionId}-${index}`,
-      text
+      text: option.text
     }));
-    const clampedCorrectOptionIndex = Math.max(0, Math.min(examForm.question.correctOptionIndex, options.length - 1));
     const parsedDuration = examForm.duration.trim() === "" ? undefined : Number(examForm.duration);
+    const correctOptionId = options[normalizedOptions.findIndex(
+      option => option.originalIndex === examForm.question.correctOptionIndex
+    )].id;
 
     const payload = {
       title: examForm.title.trim(),
@@ -134,7 +152,7 @@ export default function MentorDashboard() {
           id: questionId,
           prompt: examForm.question.prompt.trim(),
           options,
-          correctOptionId: options[clampedCorrectOptionIndex].id
+          correctOptionId
         }
       ]
     };

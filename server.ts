@@ -300,8 +300,8 @@ async function startServer() {
   const stripExamAnswers = (exam: ExamRecord) => ({
     ...exam,
     questions: exam.questions.map(question => {
-      const { correctOptionId, ...questionWithoutAnswer } = question;
-      return questionWithoutAnswer;
+      const { correctOptionId, ...strippedQuestion } = question;
+      return strippedQuestion;
     })
   });
 
