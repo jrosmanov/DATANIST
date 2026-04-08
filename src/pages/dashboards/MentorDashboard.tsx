@@ -19,7 +19,7 @@ import {
   ExternalLink,
   AlertCircle
 } from "lucide-react";
-import { CMSContent, Notification } from "../../types";
+import { CMSContent, Notification, Exam as ExamType } from "../../types";
 
 interface Student {
   id: string;
@@ -31,25 +31,127 @@ interface Student {
   cohort: string;
 }
 
+interface ExamQuestionForm {
+  prompt: string;
+  options: string[];
+  correctOptionIndex: number;
+}
+
+interface ExamFormState {
+  title: string;
+  description: string;
+  type: "online" | "written";
+  category: "multiple-choice" | "coding" | "short-answer" | "essay";
+  dueDate: string;
+  duration: string;
+  instructions: string;
+  requirementId: string;
+  question: ExamQuestionForm;
+}
+
+const initialExamForm: ExamFormState = {
+  title: "",
+  description: "",
+  type: "online",
+  category: "multiple-choice",
+  dueDate: "",
+  duration: "60",
+  instructions: "",
+  requirementId: "req1",
+  question: {
+    prompt: "",
+    options: ["", "", "", ""],
+    correctOptionIndex: 0
+  }
+};
+
 export default function MentorDashboard() {
   const [activeTab, setActiveTab] = useState<"overview" | "students" | "notifications" | "scheduling" | "exams" | "cv-review">("overview");
   const [cms, setCms] = useState<CMSContent | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [mentorExams, setMentorExams] = useState<ExamType[]>([]);
+  const [examForm, setExamForm] = useState<ExamFormState>(initialExamForm);
+  const [examMessage, setExamMessage] = useState<string>("");
   const [isLoading, setIsLoading] = useState(true);
+
+  const loadMentorExams = () => {
+    fetch("/api/mentor/exams")
+      .then(res => res.json())
+      .then(examsData => setMentorExams(examsData));
+  };
 
   useEffect(() => {
     Promise.all([
       fetch("/api/cms/content").then(res => res.json()),
       fetch("/api/students").then(res => res.json()),
-      fetch("/api/notifications").then(res => res.json())
-    ]).then(([cmsData, studentData, notifData]) => {
+      fetch("/api/notifications").then(res => res.json()),
+      fetch("/api/mentor/exams").then(res => res.json())
+    ]).then(([cmsData, studentData, notifData, examsData]) => {
       setCms(cmsData);
       setStudents(studentData);
       setNotifications(notifData);
+      setMentorExams(examsData);
       setIsLoading(false);
     });
   }, []);
+
+  const handleCreateExam = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setExamMessage("");
+
+    const normalizedOptions = examForm.question.options.map(option => option.trim()).filter(Boolean);
+    if (normalizedOptions.length < 2) {
+      setExamMessage("Please provide at least two answer options.");
+      return;
+    }
+
+    if (!examForm.question.prompt.trim()) {
+      setExamMessage("Please provide a question.");
+      return;
+    }
+
+    const payload = {
+      title: examForm.title.trim(),
+      description: examForm.description.trim(),
+      type: examForm.type,
+      category: examForm.category,
+      dueDate: examForm.dueDate,
+      duration: Number(examForm.duration) || undefined,
+      instructions: examForm.instructions.trim(),
+      requirements: [examForm.requirementId],
+      questions: [
+        {
+          id: `q-${Date.now()}`,
+          prompt: examForm.question.prompt.trim(),
+          options: normalizedOptions.map((text, index) => ({ id: `o-${Date.now()}-${index}`, text })),
+          correctOptionId: `o-${Date.now()}-${Math.max(0, Math.min(examForm.question.correctOptionIndex, normalizedOptions.length - 1))}`
+        }
+      ]
+    };
+
+    payload.questions[0].options = normalizedOptions.map((text, index) => ({
+      id: `o-${payload.questions[0].id}-${index}`,
+      text
+    }));
+    payload.questions[0].correctOptionId = payload.questions[0].options[Math.max(0, Math.min(examForm.question.correctOptionIndex, payload.questions[0].options.length - 1))].id;
+
+    const response = await fetch("/api/mentor/exams", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      setExamMessage(error.error || "Failed to create exam.");
+      return;
+    }
+
+    setExamMessage("Exam created successfully.");
+    setExamForm(initialExamForm);
+    loadMentorExams();
+  };
 
   if (isLoading || !cms) return null;
 
@@ -284,22 +386,132 @@ export default function MentorDashboard() {
           )}
 
           {activeTab === "exams" && (
-            <div className="card p-12 text-center space-y-6">
-              <div className="w-20 h-20 bg-amber-50 rounded-3xl flex items-center justify-center mx-auto">
-                <FileText className="w-10 h-10 text-amber-500" />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="card p-6 space-y-4">
+                <h2 className="text-xl font-black text-slate-900">Create Exam (Mentor)</h2>
+                <p className="text-sm text-slate-500">Add one question with answer options to publish a new exam.</p>
+                <form className="space-y-3" onSubmit={handleCreateExam}>
+                  <input
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
+                    placeholder="Exam title"
+                    value={examForm.title}
+                    onChange={(e) => setExamForm(prev => ({ ...prev, title: e.target.value }))}
+                    required
+                  />
+                  <textarea
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
+                    placeholder="Exam description"
+                    value={examForm.description}
+                    onChange={(e) => setExamForm(prev => ({ ...prev, description: e.target.value }))}
+                    required
+                  />
+                  <div className="grid grid-cols-2 gap-3">
+                    <select
+                      className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
+                      value={examForm.type}
+                      onChange={(e) => setExamForm(prev => ({ ...prev, type: e.target.value as "online" | "written" }))}
+                    >
+                      <option value="online">Online</option>
+                      <option value="written">Written</option>
+                    </select>
+                    <select
+                      className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
+                      value={examForm.category}
+                      onChange={(e) => setExamForm(prev => ({ ...prev, category: e.target.value as "multiple-choice" | "coding" | "short-answer" | "essay" }))}
+                    >
+                      <option value="multiple-choice">Multiple Choice</option>
+                      <option value="coding">Coding</option>
+                      <option value="short-answer">Short Answer</option>
+                      <option value="essay">Essay</option>
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <input
+                      type="datetime-local"
+                      className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
+                      value={examForm.dueDate}
+                      onChange={(e) => setExamForm(prev => ({ ...prev, dueDate: e.target.value }))}
+                      required
+                    />
+                    <input
+                      type="number"
+                      min={10}
+                      className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
+                      value={examForm.duration}
+                      onChange={(e) => setExamForm(prev => ({ ...prev, duration: e.target.value }))}
+                      placeholder="Duration (minutes)"
+                    />
+                  </div>
+                  <input
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
+                    placeholder="Question prompt"
+                    value={examForm.question.prompt}
+                    onChange={(e) => setExamForm(prev => ({ ...prev, question: { ...prev.question, prompt: e.target.value } }))}
+                    required
+                  />
+                  <div className="grid grid-cols-2 gap-3">
+                    {examForm.question.options.map((option, index) => (
+                      <input
+                        key={index}
+                        className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
+                        placeholder={`Option ${index + 1}`}
+                        value={option}
+                        onChange={(e) => setExamForm(prev => {
+                          const nextOptions = [...prev.question.options];
+                          nextOptions[index] = e.target.value;
+                          return { ...prev, question: { ...prev.question, options: nextOptions } };
+                        })}
+                      />
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <select
+                      className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
+                      value={examForm.question.correctOptionIndex}
+                      onChange={(e) => setExamForm(prev => ({ ...prev, question: { ...prev.question, correctOptionIndex: Number(e.target.value) } }))}
+                    >
+                      {examForm.question.options.map((_, index) => (
+                        <option key={index} value={index}>Correct option {index + 1}</option>
+                      ))}
+                    </select>
+                    <input
+                      className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
+                      value={examForm.requirementId}
+                      onChange={(e) => setExamForm(prev => ({ ...prev, requirementId: e.target.value }))}
+                      placeholder="Requirement id (ex: req1)"
+                    />
+                  </div>
+                  <textarea
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
+                    placeholder="Instructions"
+                    value={examForm.instructions}
+                    onChange={(e) => setExamForm(prev => ({ ...prev, instructions: e.target.value }))}
+                  />
+                  <button className="btn-primary w-full" type="submit">Create Exam</button>
+                  {examMessage && (
+                    <p className="text-xs font-bold text-slate-500">{examMessage}</p>
+                  )}
+                </form>
               </div>
-              <div className="max-w-md mx-auto">
-                <h2 className="text-2xl font-black text-slate-900">Exams & Assessment</h2>
-                <p className="text-slate-500 mt-2 leading-relaxed">
-                  Review exam results, manually grade projects, and update student scores for the current cohort.
-                </p>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-xl mx-auto pt-8">
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 text-sm font-bold text-slate-600">
-                  C Programming Exam (Pending)
-                </div>
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 text-sm font-bold text-slate-600">
-                  Python Basics Quiz (Completed)
+
+              <div className="card p-6">
+                <h3 className="text-xl font-black text-slate-900 mb-4">Existing Exams</h3>
+                <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
+                  {mentorExams.map((exam) => (
+                    <div key={exam.id} className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="font-bold text-slate-900">{exam.title}</p>
+                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{exam.type}</span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1">{exam.description}</p>
+                      <p className="text-xs text-slate-400 mt-2">
+                        Questions: {exam.questions?.length || 0} • Due: {new Date(exam.dueDate).toLocaleDateString()}
+                      </p>
+                    </div>
+                  ))}
+                  {mentorExams.length === 0 && (
+                    <p className="text-sm text-slate-500">No exams yet.</p>
+                  )}
                 </div>
               </div>
             </div>
