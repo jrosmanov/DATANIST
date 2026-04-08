@@ -1,0 +1,8 @@
+{
+  "name": "Holberton School Platform",
+  "description": "A professional education platform for Holberton School with RBAC, CMS, and student-staff coordination tools.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
