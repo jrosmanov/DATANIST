@@ -111,12 +111,14 @@ export default function MentorDashboard() {
       return;
     }
 
-    const questionId = `q-${Date.now()}`;
+    const uuidSource = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const questionId = `q-${uuidSource}`;
     const options = normalizedOptions.map((text, index) => ({
       id: `o-${questionId}-${index}`,
       text
     }));
-    const safeCorrectIndex = Math.max(0, Math.min(examForm.question.correctOptionIndex, options.length - 1));
+    const clampedCorrectOptionIndex = Math.max(0, Math.min(examForm.question.correctOptionIndex, options.length - 1));
+    const parsedDuration = examForm.duration.trim() === "" ? undefined : Number(examForm.duration);
 
     const payload = {
       title: examForm.title.trim(),
@@ -124,7 +126,7 @@ export default function MentorDashboard() {
       type: examForm.type,
       category: examForm.category,
       dueDate: examForm.dueDate,
-      duration: Number(examForm.duration) || undefined,
+      duration: Number.isFinite(parsedDuration) && parsedDuration && parsedDuration > 0 ? parsedDuration : undefined,
       instructions: examForm.instructions.trim(),
       requirements: [examForm.requirementId],
       questions: [
@@ -132,7 +134,7 @@ export default function MentorDashboard() {
           id: questionId,
           prompt: examForm.question.prompt.trim(),
           options,
-          correctOptionId: options[safeCorrectIndex].id
+          correctOptionId: options[clampedCorrectOptionIndex].id
         }
       ]
     };

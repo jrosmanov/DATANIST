@@ -1,6 +1,7 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import { randomUUID } from "crypto";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -390,7 +391,7 @@ async function startServer() {
       return;
     }
 
-    const newExam: ExamRecord = { ...req.body, id: Math.random().toString(36).substr(2, 9), status: "pending" };
+    const newExam: ExamRecord = { ...req.body, id: randomUUID(), status: "pending" };
     exams.push(newExam);
     res.json(newExam);
   });
