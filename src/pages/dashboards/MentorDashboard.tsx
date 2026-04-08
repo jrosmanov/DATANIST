@@ -158,9 +158,9 @@ export default function MentorDashboard() {
     }
 
     const parsedDuration = examForm.duration.trim() === "" ? undefined : Number(examForm.duration);
-    const questionsPayload = examForm.questions.map((question, questionIndex) => {
-      const questionUuid = crypto.randomUUID();
-      const questionId = `q-${questionUuid}`;
+    const questionsPayload = [];
+    for (const question of examForm.questions) {
+      const questionId = `q-${crypto.randomUUID()}`;
       const normalizedOptions = question.options
         .map((option, optionIndex) => ({ text: option.trim(), originalIndex: optionIndex }))
         .filter(option => option.text.length > 0);
@@ -172,13 +172,18 @@ export default function MentorDashboard() {
         option => option.originalIndex === question.correctOptionIndex
       );
 
-      return {
-        id: `${questionId}-${questionIndex}`,
+      if (correctOptionIndex < 0) {
+        setExamMessage("Each question must have a valid correct option.");
+        return;
+      }
+
+      questionsPayload.push({
+        id: questionId,
         prompt: question.prompt.trim(),
         options,
-        correctOptionId: options[Math.max(0, correctOptionIndex)].id
-      };
-    });
+        correctOptionId: options[correctOptionIndex].id
+      });
+    }
 
     const payload = {
       title: examForm.title.trim(),

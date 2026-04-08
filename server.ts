@@ -34,8 +34,7 @@ interface ExamRecord {
   questions: ExamQuestion[];
 }
 
-type PublicExamQuestion = Omit<ExamQuestion, "correctOptionId">;
-type PublicExamRecord = Omit<ExamRecord, "questions"> & { questions: PublicExamQuestion[] };
+type PublicExamRecord = Omit<ExamRecord, "questions"> & { questions: ExamQuestion[] };
 
 async function startServer() {
   const app = express();
@@ -335,10 +334,7 @@ async function startServer() {
 
   const stripExamAnswers = (exam: ExamRecord): PublicExamRecord => ({
     ...exam,
-    questions: exam.questions.map(question => {
-      const { correctOptionId, ...strippedQuestion } = question;
-      return strippedQuestion;
-    })
+    questions: exam.questions.map(question => ({ ...question, correctOptionId: "" }))
   });
 
   const isValidExamPayload = (payload: any) => {
@@ -449,6 +445,11 @@ async function startServer() {
     }
 
     if (exam.type === "online") {
+      if (exam.questions.length === 0) {
+        res.status(400).json({ error: "Cannot submit an online exam without questions." });
+        return;
+      }
+
       const answers = req.body?.answers ?? {};
       let correctAnswers = 0;
 
@@ -458,7 +459,7 @@ async function startServer() {
         }
       }
 
-      const score = exam.questions.length === 0 ? 0 : Math.round((correctAnswers / exam.questions.length) * 100);
+      const score = Math.round((correctAnswers / exam.questions.length) * 100);
       exam.score = score;
       exam.status = "graded";
 

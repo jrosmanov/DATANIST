@@ -71,7 +71,7 @@ export default function Exam() {
 
   const handleStartExam = (exam: ExamType) => {
     if (!exam.questions || exam.questions.length === 0) {
-      setExamActionMessage("This exam has no questions yet. Please contact your mentor.");
+      setExamActionMessage("This exam is not publish-ready yet because no questions were provided. Please contact your mentor.");
       return;
     }
     setExamActionMessage("");
