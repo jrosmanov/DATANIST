@@ -34,6 +34,9 @@ interface ExamRecord {
   questions: ExamQuestion[];
 }
 
+type PublicExamQuestion = Omit<ExamQuestion, "correctOptionId">;
+type PublicExamRecord = Omit<ExamRecord, "questions"> & { questions: PublicExamQuestion[] };
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -297,7 +300,7 @@ async function startServer() {
     }
   ];
 
-  const stripExamAnswers = (exam: ExamRecord) => ({
+  const stripExamAnswers = (exam: ExamRecord): PublicExamRecord => ({
     ...exam,
     questions: exam.questions.map(question => {
       const { correctOptionId, ...strippedQuestion } = question;

@@ -185,6 +185,12 @@ export default function MentorDashboard() {
     { id: "cv-review", label: "CV Review", icon: Briefcase, show: cms.showCVReview },
   ].filter(t => t.show !== false);
 
+  const formatExamDueDate = (dueDate: string) => {
+    const parsedDate = new Date(dueDate);
+    if (Number.isNaN(parsedDate.getTime())) return "Invalid due date";
+    return parsedDate.toLocaleDateString();
+  };
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -526,7 +532,7 @@ export default function MentorDashboard() {
                       </div>
                       <p className="text-xs text-slate-500 mt-1">{exam.description}</p>
                       <p className="text-xs text-slate-400 mt-2">
-                        Questions: {exam.questions?.length || 0} • Due: {new Date(exam.dueDate).toLocaleDateString()}
+                        Questions: {exam.questions?.length || 0} • Due: {formatExamDueDate(exam.dueDate)}
                       </p>
                     </div>
                   ))}
