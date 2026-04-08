@@ -298,10 +298,10 @@ async function startServer() {
 
   const stripExamAnswers = (exam: ExamRecord) => ({
     ...exam,
-    questions: exam.questions.map(question => ({
-      ...question,
-      correctOptionId: undefined
-    }))
+    questions: exam.questions.map(question => {
+      const { correctOptionId, ...questionWithoutAnswer } = question;
+      return questionWithoutAnswer;
+    })
   });
 
   const isValidExamPayload = (payload: any) => {

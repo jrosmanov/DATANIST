@@ -111,6 +111,13 @@ export default function MentorDashboard() {
       return;
     }
 
+    const questionId = `q-${Date.now()}`;
+    const options = normalizedOptions.map((text, index) => ({
+      id: `o-${questionId}-${index}`,
+      text
+    }));
+    const safeCorrectIndex = Math.max(0, Math.min(examForm.question.correctOptionIndex, options.length - 1));
+
     const payload = {
       title: examForm.title.trim(),
       description: examForm.description.trim(),
@@ -122,19 +129,13 @@ export default function MentorDashboard() {
       requirements: [examForm.requirementId],
       questions: [
         {
-          id: `q-${Date.now()}`,
+          id: questionId,
           prompt: examForm.question.prompt.trim(),
-          options: normalizedOptions.map((text, index) => ({ id: `o-${Date.now()}-${index}`, text })),
-          correctOptionId: `o-${Date.now()}-${Math.max(0, Math.min(examForm.question.correctOptionIndex, normalizedOptions.length - 1))}`
+          options,
+          correctOptionId: options[safeCorrectIndex].id
         }
       ]
     };
-
-    payload.questions[0].options = normalizedOptions.map((text, index) => ({
-      id: `o-${payload.questions[0].id}-${index}`,
-      text
-    }));
-    payload.questions[0].correctOptionId = payload.questions[0].options[Math.max(0, Math.min(examForm.question.correctOptionIndex, payload.questions[0].options.length - 1))].id;
 
     const response = await fetch("/api/mentor/exams", {
       method: "POST",
